@@ -90,6 +90,7 @@ struct p2p_device {
 #define P2P_DEV_PD_FOR_JOIN BIT(14)
 #define P2P_DEV_REPORTED_ONCE BIT(15)
 #define P2P_DEV_PREFER_PERSISTENT_RECONN BIT(16)
+#define P2P_DEV_PD_BEFORE_GO_NEG BIT(17)
 	unsigned int flags;
 
 	int status; /* enum p2p_status_code */
@@ -108,6 +109,7 @@ struct p2p_sd_query {
 	struct p2p_sd_query *next;
 	u8 peer[ETH_ALEN];
 	int for_all_peers;
+	int wsd; /* Wi-Fi Display Service Discovery Request */
 	struct wpabuf *tlvs;
 };
 
@@ -206,6 +208,11 @@ struct p2p_data {
 		 * P2P_SEARCH_WHEN_READY - Waiting to start Search
 		 */
 		P2P_SEARCH_WHEN_READY,
+
+		/**
+		 * P2P_CONTINUE_SEARCH_WHEN_READY - Waiting to continue Search
+		 */
+		P2P_CONTINUE_SEARCH_WHEN_READY,
 	} state;
 
 	/**
@@ -343,7 +350,12 @@ struct p2p_data {
 	 * srv_update_indic - Service Update Indicator for local services
 	 */
 	u16 srv_update_indic;
-
+#ifdef ANDROID_P2P
+	/**
+	 * srv_count - Registered services count
+	 */
+	u16 srv_count;
+#endif
 	struct wpabuf *sd_resp; /* Fragmented SD response */
 	u8 sd_resp_addr[ETH_ALEN];
 	u8 sd_resp_dialog_token;
@@ -431,6 +443,27 @@ struct p2p_data {
 	 * in IDLE state.
 	 */
 	int pd_retries;
+
+	u8 go_timeout;
+	u8 client_timeout;
+
+	/* Extra delay in milliseconds between search iterations */
+	unsigned int search_delay;
+	int in_search_delay;
+
+#ifdef CONFIG_WIFI_DISPLAY
+	struct wpabuf *wfd_ie_beacon;
+	struct wpabuf *wfd_ie_probe_req;
+	struct wpabuf *wfd_ie_probe_resp;
+	struct wpabuf *wfd_ie_assoc_req;
+	struct wpabuf *wfd_ie_invitation;
+	struct wpabuf *wfd_ie_prov_disc_req;
+	struct wpabuf *wfd_ie_prov_disc_resp;
+	struct wpabuf *wfd_ie_go_neg;
+	struct wpabuf *wfd_dev_info;
+	struct wpabuf *wfd_assoc_bssid;
+	struct wpabuf *wfd_coupled_sink_info;
+#endif /* CONFIG_WIFI_DISPLAY */
 };
 
 /**
@@ -439,6 +472,7 @@ struct p2p_data {
 struct p2p_message {
 	struct wpabuf *p2p_attributes;
 	struct wpabuf *wps_attributes;
+	struct wpabuf *wfd_subelems;
 
 	u8 dialog_token;
 
@@ -557,6 +591,10 @@ const u8 * p2p_group_get_interface_addr(struct p2p_group *group);
 u8 p2p_group_presence_req(struct p2p_group *group,
 			  const u8 *client_interface_addr,
 			  const u8 *noa, size_t noa_len);
+int p2p_group_is_group_id_match(struct p2p_group *group, const u8 *group_id,
+				size_t group_id_len);
+void p2p_group_update_ies(struct p2p_group *group);
+struct wpabuf * p2p_group_get_wfd_ie(struct p2p_group *g);
 
 
 void p2p_buf_add_action_hdr(struct wpabuf *buf, u8 subtype, u8 dialog_token);
@@ -588,7 +626,7 @@ void p2p_buf_add_noa(struct wpabuf *buf, u8 noa_index, u8 opp_ps, u8 ctwindow,
 void p2p_buf_add_ext_listen_timing(struct wpabuf *buf, u16 period,
 				   u16 interval);
 void p2p_buf_add_p2p_interface(struct wpabuf *buf, struct p2p_data *p2p);
-void p2p_build_wps_ie(struct p2p_data *p2p, struct wpabuf *buf, u16 pw_id,
+void p2p_build_wps_ie(struct p2p_data *p2p, struct wpabuf *buf, int pw_id,
 		      int all_attr);
 
 /* p2p_sd.c */
@@ -616,6 +654,9 @@ void p2p_process_go_neg_resp(struct p2p_data *p2p, const u8 *sa,
 void p2p_process_go_neg_conf(struct p2p_data *p2p, const u8 *sa,
 			     const u8 *data, size_t len);
 int p2p_connect_send(struct p2p_data *p2p, struct p2p_device *dev);
+u16 p2p_wps_method_pw_id(enum p2p_wps_method wps_method);
+void p2p_reselect_channel(struct p2p_data *p2p,
+			  struct p2p_channels *intersection);
 
 /* p2p_pd.c */
 void p2p_process_prov_disc_req(struct p2p_data *p2p, const u8 *sa,
@@ -660,7 +701,7 @@ struct p2p_device * p2p_add_dev_from_go_neg_req(struct p2p_data *p2p,
 void p2p_add_dev_info(struct p2p_data *p2p, const u8 *addr,
 		      struct p2p_device *dev, struct p2p_message *msg);
 int p2p_add_device(struct p2p_data *p2p, const u8 *addr, int freq, int level,
-		   const u8 *ies, size_t ies_len);
+		   const u8 *ies, size_t ies_len, int scan_res);
 struct p2p_device * p2p_get_device(struct p2p_data *p2p, const u8 *addr);
 struct p2p_device * p2p_get_device_interface(struct p2p_data *p2p,
 					     const u8 *addr);
@@ -675,5 +716,6 @@ void p2p_build_ssid(struct p2p_data *p2p, u8 *ssid, size_t *ssid_len);
 int p2p_send_action(struct p2p_data *p2p, unsigned int freq, const u8 *dst,
 		    const u8 *src, const u8 *bssid, const u8 *buf,
 		    size_t len, unsigned int wait_time);
+void p2p_stop_listen_for_freq(struct p2p_data *p2p, int freq);
 
 #endif /* P2P_I_H */

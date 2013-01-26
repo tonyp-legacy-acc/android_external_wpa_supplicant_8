@@ -317,6 +317,7 @@ struct eap_sm {
 	void *msg_ctx;
 	void *scard_ctx;
 	void *ssl_ctx;
+	void *ssl_ctx2;
 
 	unsigned int workaround;
 
@@ -329,6 +330,9 @@ struct eap_sm {
 	struct wps_context *wps;
 
 	int prev_failure;
+
+	struct ext_password_data *ext_pw;
+	struct wpabuf *ext_pw_buf;
 };
 
 const u8 * eap_get_config_identity(struct eap_sm *sm, size_t *len);

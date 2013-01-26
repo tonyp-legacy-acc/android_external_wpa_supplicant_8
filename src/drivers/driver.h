@@ -100,6 +100,16 @@ struct hostapd_hw_modes {
 	 */
 	u8 a_mpdu_params;
 
+	/**
+	 * vht_capab - VHT (IEEE 802.11ac) capabilities
+	 */
+	u32 vht_capab;
+
+	/**
+	 * vht_mcs_set - VHT MCS (IEEE 802.11ac) rate parameters
+	 */
+	u8 vht_mcs_set[8];
+
 	unsigned int flags; /* HOSTAPD_MODE_FLAG_* */
 };
 
@@ -264,6 +274,15 @@ struct wpa_driver_scan_params {
 	size_t num_filter_ssids;
 
 	/**
+	 * filter_rssi - Filter by RSSI
+	 *
+	 * The driver may filter scan results in firmware to reduce host
+	 * wakeups and thereby save power. Specify the RSSI threshold in s32
+	 * dBm.
+	 */
+	s32 filter_rssi;
+
+	/**
 	 * p2p_probe - Used to disable CCK (802.11b) rates for P2P probes
 	 *
 	 * When set, the driver is expected to remove rates 1, 2, 5.5, and 11
@@ -331,6 +350,13 @@ struct wpa_driver_associate_params {
 	 * reported in the scan results)
 	 */
 	int freq;
+
+	/**
+	 * bg_scan_period - Background scan period in seconds, 0 to disable
+	 * background scan, or -1 to indicate no change to default driver
+	 * configuration
+	 */
+	int bg_scan_period;
 
 	/**
 	 * wpa_ie - WPA information element for (Re)Association Request
@@ -707,6 +733,18 @@ struct wpa_driver_ap_params {
 	 * enabled.
 	 */
 	u8 access_network_type;
+
+	/**
+	 * ap_max_inactivity - Timeout in seconds to detect STA's inactivity
+	 *
+	 * This is used by driver which advertises this capability.
+	 */
+	int ap_max_inactivity;
+
+	/**
+	 * disable_dgaf - Whether group-addressed frames are disabled
+	 */
+	int disable_dgaf;
 };
 
 /**
@@ -726,6 +764,8 @@ struct wpa_driver_capa {
 #define WPA_DRIVER_CAPA_ENC_WEP104	0x00000002
 #define WPA_DRIVER_CAPA_ENC_TKIP	0x00000004
 #define WPA_DRIVER_CAPA_ENC_CCMP	0x00000008
+#define WPA_DRIVER_CAPA_ENC_WEP128	0x00000010
+#define WPA_DRIVER_CAPA_ENC_GCMP	0x00000020
 	unsigned int enc;
 
 #define WPA_DRIVER_AUTH_OPEN		0x00000001
@@ -790,6 +830,10 @@ struct wpa_driver_capa {
 #define WPA_DRIVER_FLAGS_PROBE_RESP_OFFLOAD		0x00200000
 /* Driver supports U-APSD in AP mode */
 #define WPA_DRIVER_FLAGS_AP_UAPSD			0x00400000
+/* Driver supports inactivity timer in AP mode */
+#define WPA_DRIVER_FLAGS_INACTIVITY_TIMER		0x00800000
+/* Driver expects user space implementation of MLME in AP mode */
+#define WPA_DRIVER_FLAGS_AP_MLME			0x01000000
 	unsigned int flags;
 
 	int max_scan_ssids;
@@ -956,6 +1000,23 @@ enum tdls_oper {
 	TDLS_DISABLE
 };
 
+enum wnm_oper {
+	WNM_SLEEP_ENTER_CONFIRM,
+	WNM_SLEEP_ENTER_FAIL,
+	WNM_SLEEP_EXIT_CONFIRM,
+	WNM_SLEEP_EXIT_FAIL,
+	WNM_SLEEP_TFS_REQ_IE_ADD,   /* STA requests driver to add TFS req IE */
+	WNM_SLEEP_TFS_REQ_IE_NONE,  /* STA requests empty TFS req IE */
+	WNM_SLEEP_TFS_REQ_IE_SET,   /* AP requests driver to set TFS req IE for
+				     * a STA */
+	WNM_SLEEP_TFS_RESP_IE_ADD,  /* AP requests driver to add TFS resp IE
+				     * for a STA */
+	WNM_SLEEP_TFS_RESP_IE_NONE, /* AP requests empty TFS resp IE */
+	WNM_SLEEP_TFS_RESP_IE_SET,  /* AP requests driver to set TFS resp IE
+				     * for a STA */
+	WNM_SLEEP_TFS_IE_DEL        /* AP delete the TFS IE */
+};
+
 /**
  * struct wpa_signal_info - Information about channel signal quality
  */
@@ -1015,7 +1076,8 @@ struct wpa_driver_ops {
 	 * @ifname: Interface name (for multi-SSID/VLAN support)
 	 * @priv: private driver interface data
 	 * @alg: encryption algorithm (%WPA_ALG_NONE, %WPA_ALG_WEP,
-	 *	%WPA_ALG_TKIP, %WPA_ALG_CCMP, %WPA_ALG_IGTK, %WPA_ALG_PMK);
+	 *	%WPA_ALG_TKIP, %WPA_ALG_CCMP, %WPA_ALG_IGTK, %WPA_ALG_PMK,
+	 *	%WPA_ALG_GCMP);
 	 *	%WPA_ALG_NONE clears the key.
 	 * @addr: Address of the peer STA (BSSID of the current AP when setting
 	 *	pairwise key in station mode), ff:ff:ff:ff:ff:ff for
@@ -1032,11 +1094,11 @@ struct wpa_driver_ops {
 	 *	for Rx keys (in most cases, this is only used with broadcast
 	 *	keys and set to zero for unicast keys); %NULL if not set
 	 * @seq_len: length of the seq, depends on the algorithm:
-	 *	TKIP: 6 octets, CCMP: 6 octets, IGTK: 6 octets
+	 *	TKIP: 6 octets, CCMP/GCMP: 6 octets, IGTK: 6 octets
 	 * @key: key buffer; TKIP: 16-byte temporal key, 8-byte Tx Mic key,
 	 *	8-byte Rx Mic Key
 	 * @key_len: length of the key buffer in octets (WEP: 5 or 13,
-	 *	TKIP: 32, CCMP: 16, IGTK: 16)
+	 *	TKIP: 32, CCMP/GCMP: 16, IGTK: 16)
 	 *
 	 * Returns: 0 on success, -1 on failure
 	 *
@@ -1541,9 +1603,9 @@ struct wpa_driver_ops {
 	 * Returns: 0 on success, -1 on failure
 	 *
 	 * This function is used to fetch the last used TSC/packet number for
-	 * a TKIP, CCMP, or BIP/IGTK key. It is mainly used with group keys, so
-	 * there is no strict requirement on implementing support for unicast
-	 * keys (i.e., addr != %NULL).
+	 * a TKIP, CCMP, GCMP, or BIP/IGTK key. It is mainly used with group
+	 * keys, so there is no strict requirement on implementing support for
+	 * unicast keys (i.e., addr != %NULL).
 	 */
 	int (*get_seqnum)(const char *ifname, void *priv, const u8 *addr,
 			  int idx, u8 *seq);
@@ -1576,7 +1638,7 @@ struct wpa_driver_ops {
 	int (*set_generic_elem)(void *priv, const u8 *elem, size_t elem_len);
 
 	/**
-	 * read_sta_data - Fetch station data (AP only)
+	 * read_sta_data - Fetch station data
 	 * @priv: Private driver interface data
 	 * @data: Buffer for returning station information
 	 * @addr: MAC address of the station
@@ -2003,6 +2065,16 @@ struct wpa_driver_ops {
 	int (*deinit_ap)(void *priv);
 
 	/**
+	 * deinit_p2p_cli - Deinitialize P2P client mode
+	 * @priv: Private driver interface data
+	 * Returns: 0 on success, -1 on failure (or if not supported)
+	 *
+	 * This optional function can be used to disable P2P client mode. It
+	 * can be used to change the interface type back to station mode.
+	 */
+	int (*deinit_p2p_cli)(void *priv);
+
+	/**
 	 * suspend - Notification on system suspend/hibernate event
 	 * @priv: Private driver interface data
 	 */
@@ -2362,6 +2434,18 @@ struct wpa_driver_ops {
 	int (*tdls_oper)(void *priv, enum tdls_oper oper, const u8 *peer);
 
 	/**
+	 * wnm_oper - Notify driver of the WNM frame reception
+	 * @priv: Private driver interface data
+	 * @oper: WNM operation. See %enum wnm_oper
+	 * @peer: Destination (peer) MAC address
+	 * @buf: Buffer for the driver to fill in (for getting IE)
+	 * @buf_len: Return the len of buf
+	 * Returns: 0 on success, negative (<0) on failure
+	 */
+	int (*wnm_oper)(void *priv, enum wnm_oper oper, const u8 *peer,
+			u8 *buf, u16 *buf_len);
+
+	/**
 	 * signal_poll - Get current connection information
 	 * @priv: Private driver interface data
 	 * @signal_info: Connection info structure
@@ -2508,19 +2592,30 @@ struct wpa_driver_ops {
 	 */
 	void (*poll_client)(void *priv, const u8 *own_addr,
 			    const u8 *addr, int qos);
-#ifdef ANDROID_P2P
+
 	/**
-	 * switch_channel - Announce channel switch and migrate the GO to a
-	 * given frequency.
+	 * radio_disable - Disable/enable radio
 	 * @priv: Private driver interface data
-	 * @freq: frequency in MHz
+	 * @disabled: 1=disable 0=enable radio
 	 * Returns: 0 on success, -1 on failure
 	 *
-	 * This function is used to move the GO to the legacy STA channel to avoid
-	 * frequency conflict in single channel concurrency.
+	 * This optional command is for testing purposes. It can be used to
+	 * disable the radio on a testbed device to simulate out-of-radio-range
+	 * conditions.
+	 */
+	int (*radio_disable)(void *priv, int disabled);
+
+	/**
+	 * switch_channel - Announce channel switch and migrate the GO to the
+	 * given frequency
+	 * @priv: Private driver interface data
+	 * @freq: Frequency in MHz
+	 * Returns: 0 on success, -1 on failure
+	 *
+	 * This function is used to move the GO to the legacy STA channel to
+	 * avoid frequency conflict in single channel concurrency.
 	 */
 	int (*switch_channel)(void *priv, unsigned int freq);
-#endif
 };
 
 
@@ -2951,7 +3046,21 @@ enum wpa_event_type {
 	/**
 	 * EVENT_EAPOL_TX_STATUS - notify of EAPOL TX status
 	 */
-	EVENT_EAPOL_TX_STATUS
+	EVENT_EAPOL_TX_STATUS,
+
+	/**
+	 * EVENT_CH_SWITCH - AP or GO decided to switch channels
+	 *
+	 * Described in wpa_event_data.ch_switch
+	 * */
+	EVENT_CH_SWITCH,
+
+	/**
+	 * EVENT_WNM - Request WNM operation
+	 *
+	 * This event can be used to request a WNM operation to be performed.
+	 */
+	EVENT_WNM
 };
 
 
@@ -3154,6 +3263,24 @@ union wpa_event_data {
 	} tdls;
 
 	/**
+	 * struct wnm - Data for EVENT_WNM
+	 */
+	struct wnm {
+		u8 addr[ETH_ALEN];
+		enum {
+			WNM_OPER_SLEEP,
+		} oper;
+		enum {
+			WNM_SLEEP_ENTER,
+			WNM_SLEEP_EXIT
+		} sleep_action;
+		int sleep_intval;
+		u16 reason_code;
+		u8 *buf;
+		u16 buf_len;
+	} wnm;
+
+	/**
 	 * struct ft_ies - FT information elements (EVENT_FT_RESPONSE)
 	 *
 	 * During FT (IEEE 802.11r) authentication sequence, the driver is
@@ -3267,7 +3394,7 @@ union wpa_event_data {
 		const u8 *frame;
 		size_t frame_len;
 		u32 datarate;
-		u32 ssi_signal;
+		int ssi_signal; /* dBm */
 	} rx_mgmt;
 
 	/**
@@ -3385,6 +3512,11 @@ union wpa_event_data {
 		 * ie_len - Length of ie buffer in octets
 		 */
 		size_t ie_len;
+
+		/**
+		 * signal - signal strength in dBm (or 0 if not available)
+		 */
+		int ssi_signal;
 	} rx_probe_req;
 
 	/**
@@ -3541,6 +3673,18 @@ union wpa_event_data {
 		int data_len;
 		int ack;
 	} eapol_tx_status;
+
+	/**
+	 * struct ch_switch
+	 * @freq: Frequency of new channel in MHz
+	 * @ht_enabled: Whether this is an HT channel
+	 * @ch_offset: Secondary channel offset
+	 */
+	struct ch_switch {
+		int freq;
+		int ht_enabled;
+		int ch_offset;
+	} ch_switch;
 };
 
 /**

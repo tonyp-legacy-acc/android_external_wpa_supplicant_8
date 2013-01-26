@@ -33,6 +33,7 @@
 #include "p2p_hostapd.h"
 #include "ap_drv_ops.h"
 #include "beacon.h"
+#include "hs20.h"
 
 
 #ifdef NEED_AP_MLME
@@ -205,6 +206,8 @@ static u8 * hostapd_gen_probe_resp(struct hostapd_data *hapd,
 	if (hapd->p2p_probe_resp_ie)
 		buflen += wpabuf_len(hapd->p2p_probe_resp_ie);
 #endif /* CONFIG_P2P */
+	if (hapd->conf->vendor_elements)
+		buflen += wpabuf_len(hapd->conf->vendor_elements);
 	resp = os_zalloc(buflen);
 	if (resp == NULL)
 		return NULL;
@@ -262,6 +265,11 @@ static u8 * hostapd_gen_probe_resp(struct hostapd_data *hapd,
 	pos = hostapd_eid_adv_proto(hapd, pos);
 	pos = hostapd_eid_roaming_consortium(hapd, pos);
 
+#ifdef CONFIG_IEEE80211AC
+	pos = hostapd_eid_vht_capabilities(hapd, pos);
+	pos = hostapd_eid_vht_operation(hapd, pos);
+#endif /* CONFIG_IEEE80211AC */
+
 	/* Wi-Fi Alliance WMM */
 	pos = hostapd_eid_wmm(hapd, pos);
 
@@ -287,13 +295,24 @@ static u8 * hostapd_gen_probe_resp(struct hostapd_data *hapd,
 		pos = hostapd_eid_p2p_manage(hapd, pos);
 #endif /* CONFIG_P2P_MANAGER */
 
+#ifdef CONFIG_HS20
+	pos = hostapd_eid_hs20_indication(hapd, pos);
+#endif /* CONFIG_HS20 */
+
+	if (hapd->conf->vendor_elements) {
+		os_memcpy(pos, wpabuf_head(hapd->conf->vendor_elements),
+			  wpabuf_len(hapd->conf->vendor_elements));
+		pos += wpabuf_len(hapd->conf->vendor_elements);
+	}
+
 	*resp_len = pos - (u8 *) resp;
 	return (u8 *) resp;
 }
 
 
 void handle_probe_req(struct hostapd_data *hapd,
-		      const struct ieee80211_mgmt *mgmt, size_t len)
+		      const struct ieee80211_mgmt *mgmt, size_t len,
+		      int ssi_signal)
 {
 	u8 *resp;
 	struct ieee802_11_elems elems;
@@ -311,7 +330,7 @@ void handle_probe_req(struct hostapd_data *hapd,
 	for (i = 0; hapd->probereq_cb && i < hapd->num_probereq_cb; i++)
 		if (hapd->probereq_cb[i].cb(hapd->probereq_cb[i].ctx,
 					    mgmt->sa, mgmt->da, mgmt->bssid,
-					    ie, ie_len) > 0)
+					    ie, ie_len, ssi_signal) > 0)
 			return;
 
 	if (!hapd->iconf->send_probe_response)
@@ -517,6 +536,8 @@ void ieee802_11_set_beacon(struct hostapd_data *hapd)
 	if (hapd->p2p_beacon_ie)
 		tail_len += wpabuf_len(hapd->p2p_beacon_ie);
 #endif /* CONFIG_P2P */
+	if (hapd->conf->vendor_elements)
+		tail_len += wpabuf_len(hapd->conf->vendor_elements);
 	tailpos = tail = os_malloc(tail_len);
 	if (head == NULL || tail == NULL) {
 		wpa_printf(MSG_ERROR, "Failed to set beacon data");
@@ -594,6 +615,11 @@ void ieee802_11_set_beacon(struct hostapd_data *hapd)
 	tailpos = hostapd_eid_adv_proto(hapd, tailpos);
 	tailpos = hostapd_eid_roaming_consortium(hapd, tailpos);
 
+#ifdef CONFIG_IEEE80211AC
+	tailpos = hostapd_eid_vht_capabilities(hapd, tailpos);
+	tailpos = hostapd_eid_vht_operation(hapd, tailpos);
+#endif /* CONFIG_IEEE80211AC */
+
 	/* Wi-Fi Alliance WMM */
 	tailpos = hostapd_eid_wmm(hapd, tailpos);
 
@@ -618,6 +644,16 @@ void ieee802_11_set_beacon(struct hostapd_data *hapd)
 		tailpos = hostapd_eid_p2p_manage(hapd, tailpos);
 #endif /* CONFIG_P2P_MANAGER */
 
+#ifdef CONFIG_HS20
+	tailpos = hostapd_eid_hs20_indication(hapd, tailpos);
+#endif /* CONFIG_HS20 */
+
+	if (hapd->conf->vendor_elements) {
+		os_memcpy(tailpos, wpabuf_head(hapd->conf->vendor_elements),
+			  wpabuf_len(hapd->conf->vendor_elements));
+		tailpos += wpabuf_len(hapd->conf->vendor_elements);
+	}
+
 	tail_len = tailpos > tail ? tailpos - tail : 0;
 
 	resp = hostapd_probe_resp_offloads(hapd, &resp_len);
@@ -632,8 +668,8 @@ void ieee802_11_set_beacon(struct hostapd_data *hapd)
 	params.proberesp_len = resp_len;
 	params.dtim_period = hapd->conf->dtim_period;
 	params.beacon_int = hapd->iconf->beacon_int;
-	params.basic_rates = hapd->iconf->basic_rates;
-	params.ssid = (u8 *) hapd->conf->ssid.ssid;
+	params.basic_rates = hapd->iface->basic_rates;
+	params.ssid = hapd->conf->ssid.ssid;
 	params.ssid_len = hapd->conf->ssid.ssid_len;
 	params.pairwise_ciphers = hapd->conf->rsn_pairwise ?
 		hapd->conf->rsn_pairwise : hapd->conf->wpa_pairwise;
@@ -682,6 +718,10 @@ void ieee802_11_set_beacon(struct hostapd_data *hapd)
 	    !is_zero_ether_addr(hapd->conf->hessid))
 		params.hessid = hapd->conf->hessid;
 	params.access_network_type = hapd->conf->access_network_type;
+	params.ap_max_inactivity = hapd->conf->ap_max_inactivity;
+#ifdef CONFIG_HS20
+	params.disable_dgaf = hapd->conf->disable_dgaf;
+#endif /* CONFIG_HS20 */
 	if (hostapd_drv_set_ap(hapd, &params))
 		wpa_printf(MSG_ERROR, "Failed to set beacon parameters");
 	hostapd_free_ap_extra_ies(hapd, beacon, proberesp, assocresp);
@@ -697,6 +737,16 @@ void ieee802_11_set_beacons(struct hostapd_iface *iface)
 	size_t i;
 	for (i = 0; i < iface->num_bss; i++)
 		ieee802_11_set_beacon(iface->bss[i]);
+}
+
+
+/* only update beacons if started */
+void ieee802_11_update_beacons(struct hostapd_iface *iface)
+{
+	size_t i;
+	for (i = 0; i < iface->num_bss; i++)
+		if (iface->bss[i]->beacon_set_done)
+			ieee802_11_set_beacon(iface->bss[i]);
 }
 
 #endif /* CONFIG_NATIVE_WINDOWS */

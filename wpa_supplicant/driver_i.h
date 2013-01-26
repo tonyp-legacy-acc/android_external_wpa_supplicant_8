@@ -427,6 +427,13 @@ static inline int wpa_drv_deinit_ap(struct wpa_supplicant *wpa_s)
 	return 0;
 }
 
+static inline int wpa_drv_deinit_p2p_cli(struct wpa_supplicant *wpa_s)
+{
+	if (wpa_s->driver->deinit_p2p_cli)
+		return wpa_s->driver->deinit_p2p_cli(wpa_s->drv_priv);
+	return 0;
+}
+
 static inline void wpa_drv_suspend(struct wpa_supplicant *wpa_s)
 {
 	if (wpa_s->driver->suspend)
@@ -453,6 +460,15 @@ static inline int wpa_drv_signal_poll(struct wpa_supplicant *wpa_s,
 {
 	if (wpa_s->driver->signal_poll)
 		return wpa_s->driver->signal_poll(wpa_s->drv_priv, si);
+	return -1;
+}
+
+static inline int wpa_drv_pktcnt_poll(struct wpa_supplicant *wpa_s,
+				      struct hostap_sta_driver_data *sta)
+{
+	if (wpa_s->driver->read_sta_data)
+		return wpa_s->driver->read_sta_data(wpa_s->drv_priv, sta,
+						    wpa_s->bssid);
 	return -1;
 }
 
@@ -667,13 +683,30 @@ static inline void wpa_drv_set_rekey_info(struct wpa_supplicant *wpa_s,
 	wpa_s->driver->set_rekey_info(wpa_s->drv_priv, kek, kck, replay_ctr);
 }
 
-#ifdef ANDROID_P2P
+static inline int wpa_drv_radio_disable(struct wpa_supplicant *wpa_s,
+					int disabled)
+{
+	if (!wpa_s->driver->radio_disable)
+		return -1;
+	return wpa_s->driver->radio_disable(wpa_s->drv_priv, disabled);
+}
+
 static inline int wpa_drv_switch_channel(struct wpa_supplicant *wpa_s,
-					  int freq)
+					 unsigned int freq)
 {
 	if (!wpa_s->driver->switch_channel)
 		return -1;
 	return wpa_s->driver->switch_channel(wpa_s->drv_priv, freq);
 }
-#endif
+
+static inline int wpa_drv_wnm_oper(struct wpa_supplicant *wpa_s,
+				   enum wnm_oper oper, const u8 *peer,
+				   u8 *buf, u16 *buf_len)
+{
+	if (!wpa_s->driver->wnm_oper)
+		return -1;
+	return wpa_s->driver->wnm_oper(wpa_s->drv_priv, oper, peer, buf,
+				       buf_len);
+}
+
 #endif /* DRIVER_I_H */

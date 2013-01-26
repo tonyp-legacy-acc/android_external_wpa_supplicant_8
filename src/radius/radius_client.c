@@ -281,8 +281,8 @@ int radius_client_register(struct radius_client_data *radius,
 		num = &radius->num_auth_handlers;
 	}
 
-	newh = os_realloc(*handlers,
-			  (*num + 1) * sizeof(struct radius_rx_handler));
+	newh = os_realloc_array(*handlers, *num + 1,
+				sizeof(struct radius_rx_handler));
 	if (newh == NULL)
 		return -1;
 
@@ -505,7 +505,7 @@ static void radius_client_update_timeout(struct radius_client_data *radius)
 			       NULL);
 	hostapd_logger(radius->ctx, NULL, HOSTAPD_MODULE_RADIUS,
 		       HOSTAPD_LEVEL_DEBUG, "Next RADIUS client retransmit in"
-		       " %ld seconds\n", (long int) (first - now.sec));
+		       " %ld seconds", (long int) (first - now.sec));
 }
 
 
@@ -678,7 +678,7 @@ int radius_client_send(struct radius_client_data *radius,
 	radius_client_list_add(radius, msg, msg_type, shared_secret,
 			       shared_secret_len, addr);
 
-	return res;
+	return 0;
 }
 
 

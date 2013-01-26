@@ -1,6 +1,6 @@
 /*
  * hostapd - command line interface for hostapd daemon
- * Copyright (c) 2004-2011, Jouni Malinen <j@w1.fi>
+ * Copyright (c) 2004-2012, Jouni Malinen <j@w1.fi>
  *
  * This software may be distributed under the terms of the BSD license.
  * See README for more details.
@@ -71,9 +71,15 @@ static const char *commands_help =
 "   wps_pin <uuid> <pin> [timeout] [addr]  add WPS Enrollee PIN\n"
 "   wps_check_pin <PIN>  verify PIN checksum\n"
 "   wps_pbc              indicate button pushed to initiate PBC\n"
+"   wps_cancel           cancel the pending WPS operation\n"
 #ifdef CONFIG_WPS_OOB
 "   wps_oob <type> <path> <method>  use WPS with out-of-band (UFD)\n"
 #endif /* CONFIG_WPS_OOB */
+#ifdef CONFIG_WPS_NFC
+"   wps_nfc_tag_read <hexdump>  report read NFC tag with WPS data\n"
+"   wps_nfc_config_token <WPS/NDEF>  build NFC configuration token\n"
+"   wps_nfc_token <WPS/NDEF/enable/disable>  manager NFC password token\n"
+#endif /* CONFIG_WPS_NFC */
 "   wps_ap_pin <cmd> [params..]  enable/disable AP PIN\n"
 "   wps_config <SSID> <auth> <encr> <key>  configure AP\n"
 #endif /* CONFIG_WPS */
@@ -87,7 +93,12 @@ static const char *commands_help =
 static struct wpa_ctrl *ctrl_conn;
 static int hostapd_cli_quit = 0;
 static int hostapd_cli_attached = 0;
-static const char *ctrl_iface_dir = "/var/run/hostapd";
+
+#ifndef CONFIG_CTRL_IFACE_DIR
+#define CONFIG_CTRL_IFACE_DIR "/var/run/hostapd"
+#endif /* CONFIG_CTRL_IFACE_DIR */
+static const char *ctrl_iface_dir = CONFIG_CTRL_IFACE_DIR;
+
 static char *ctrl_ifname = NULL;
 static const char *pid_file = NULL;
 static const char *action_file = NULL;
@@ -392,6 +403,13 @@ static int hostapd_cli_cmd_wps_pbc(struct wpa_ctrl *ctrl, int argc,
 }
 
 
+static int hostapd_cli_cmd_wps_cancel(struct wpa_ctrl *ctrl, int argc,
+				      char *argv[])
+{
+	return wpa_ctrl_command(ctrl, "WPS_CANCEL");
+}
+
+
 #ifdef CONFIG_WPS_OOB
 static int hostapd_cli_cmd_wps_oob(struct wpa_ctrl *ctrl, int argc,
 				   char *argv[])
@@ -424,6 +442,77 @@ static int hostapd_cli_cmd_wps_oob(struct wpa_ctrl *ctrl, int argc,
 	return wpa_ctrl_command(ctrl, cmd);
 }
 #endif /* CONFIG_WPS_OOB */
+
+
+#ifdef CONFIG_WPS_NFC
+static int hostapd_cli_cmd_wps_nfc_tag_read(struct wpa_ctrl *ctrl, int argc,
+					    char *argv[])
+{
+	int ret;
+	char *buf;
+	size_t buflen;
+
+	if (argc != 1) {
+		printf("Invalid 'wps_nfc_tag_read' command - one argument "
+		       "is required.\n");
+		return -1;
+	}
+
+	buflen = 18 + os_strlen(argv[0]);
+	buf = os_malloc(buflen);
+	if (buf == NULL)
+		return -1;
+	os_snprintf(buf, buflen, "WPS_NFC_TAG_READ %s", argv[0]);
+
+	ret = wpa_ctrl_command(ctrl, buf);
+	os_free(buf);
+
+	return ret;
+}
+
+
+static int hostapd_cli_cmd_wps_nfc_config_token(struct wpa_ctrl *ctrl,
+						int argc, char *argv[])
+{
+	char cmd[64];
+	int res;
+
+	if (argc != 1) {
+		printf("Invalid 'wps_nfc_config_token' command - one argument "
+		       "is required.\n");
+		return -1;
+	}
+
+	res = os_snprintf(cmd, sizeof(cmd), "WPS_NFC_CONFIG_TOKEN %s",
+			  argv[0]);
+	if (res < 0 || (size_t) res >= sizeof(cmd) - 1) {
+		printf("Too long WPS_NFC_CONFIG_TOKEN command.\n");
+		return -1;
+	}
+	return wpa_ctrl_command(ctrl, cmd);
+}
+
+
+static int hostapd_cli_cmd_wps_nfc_token(struct wpa_ctrl *ctrl,
+					 int argc, char *argv[])
+{
+	char cmd[64];
+	int res;
+
+	if (argc != 1) {
+		printf("Invalid 'wps_nfc_token' command - one argument is "
+		       "required.\n");
+		return -1;
+	}
+
+	res = os_snprintf(cmd, sizeof(cmd), "WPS_NFC_TOKEN %s", argv[0]);
+	if (res < 0 || (size_t) res >= sizeof(cmd) - 1) {
+		printf("Too long WPS_NFC_TOKEN command.\n");
+		return -1;
+	}
+	return wpa_ctrl_command(ctrl, cmd);
+}
+#endif /* CONFIG_WPS_NFC */
 
 
 static int hostapd_cli_cmd_wps_ap_pin(struct wpa_ctrl *ctrl, int argc,
@@ -719,9 +808,15 @@ static struct hostapd_cli_cmd hostapd_cli_commands[] = {
 	{ "wps_pin", hostapd_cli_cmd_wps_pin },
 	{ "wps_check_pin", hostapd_cli_cmd_wps_check_pin },
 	{ "wps_pbc", hostapd_cli_cmd_wps_pbc },
+	{ "wps_cancel", hostapd_cli_cmd_wps_cancel },
 #ifdef CONFIG_WPS_OOB
 	{ "wps_oob", hostapd_cli_cmd_wps_oob },
 #endif /* CONFIG_WPS_OOB */
+#ifdef CONFIG_WPS_NFC
+	{ "wps_nfc_tag_read", hostapd_cli_cmd_wps_nfc_tag_read },
+	{ "wps_nfc_config_token", hostapd_cli_cmd_wps_nfc_config_token },
+	{ "wps_nfc_token", hostapd_cli_cmd_wps_nfc_token },
+#endif /* CONFIG_WPS_NFC */
 	{ "wps_ap_pin", hostapd_cli_cmd_wps_ap_pin },
 	{ "wps_config", hostapd_cli_cmd_wps_config },
 #endif /* CONFIG_WPS */
@@ -888,7 +983,7 @@ static void hostapd_cli_interactive(void)
 
 	eloop_register_signal_terminate(hostapd_cli_eloop_terminate, NULL);
 	edit_init(hostapd_cli_edit_cmd_cb, hostapd_cli_edit_eof_cb,
-		  NULL, NULL, NULL);
+		  NULL, NULL, NULL, NULL);
 	eloop_register_timeout(ping_interval, 0, hostapd_cli_ping, NULL, NULL);
 
 	eloop_run();

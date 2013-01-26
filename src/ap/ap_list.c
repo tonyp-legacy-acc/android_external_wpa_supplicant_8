@@ -251,23 +251,9 @@ void ap_list_process_beacon(struct hostapd_iface *iface,
 		ap->ssid_len = len;
 	}
 
-	os_memset(ap->supported_rates, 0, WLAN_SUPP_RATES_MAX);
-	len = 0;
-	if (elems->supp_rates) {
-		len = elems->supp_rates_len;
-		if (len > WLAN_SUPP_RATES_MAX)
-			len = WLAN_SUPP_RATES_MAX;
-		os_memcpy(ap->supported_rates, elems->supp_rates, len);
-	}
-	if (elems->ext_supp_rates) {
-		int len2;
-		if (len + elems->ext_supp_rates_len > WLAN_SUPP_RATES_MAX)
-			len2 = WLAN_SUPP_RATES_MAX - len;
-		else
-			len2 = elems->ext_supp_rates_len;
-		os_memcpy(ap->supported_rates + len, elems->ext_supp_rates,
-			  len2);
-	}
+	merge_byte_arrays(ap->supported_rates, WLAN_SUPP_RATES_MAX,
+			  elems->supp_rates, elems->supp_rates_len,
+			  elems->ext_supp_rates, elems->ext_supp_rates_len);
 
 	ap->wpa = elems->wpa_ie != NULL;
 
@@ -289,10 +275,8 @@ void ap_list_process_beacon(struct hostapd_iface *iface,
 	ap->num_beacons++;
 	os_get_time(&now);
 	ap->last_beacon = now.sec;
-	if (fi) {
-		ap->ssi_signal = fi->ssi_signal;
+	if (fi)
 		ap->datarate = fi->datarate;
-	}
 
 	if (!new_ap && ap != iface->ap_list) {
 		/* move AP entry into the beginning of the list so that the
@@ -320,7 +304,7 @@ void ap_list_process_beacon(struct hostapd_iface *iface,
 #endif /* CONFIG_IEEE80211N */
 
 	if (set_beacon)
-		ieee802_11_set_beacons(iface);
+		ieee802_11_update_beacons(iface);
 }
 
 
@@ -375,7 +359,7 @@ static void ap_list_timer(void *eloop_ctx, void *timeout_ctx)
 	}
 
 	if (set_beacon)
-		ieee802_11_set_beacons(iface);
+		ieee802_11_update_beacons(iface);
 }
 
 

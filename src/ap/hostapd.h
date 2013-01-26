@@ -15,7 +15,6 @@ struct wpa_driver_ops;
 struct wpa_ctrl_dst;
 struct radius_server_data;
 struct upnp_wps_device_sm;
-struct hapd_interfaces;
 struct hostapd_data;
 struct sta_info;
 struct hostap_sta_driver_data;
@@ -24,9 +23,29 @@ struct full_dynamic_vlan;
 enum wps_event;
 union wps_event_data;
 
+struct hostapd_iface;
+
+struct hapd_interfaces {
+	int (*reload_config)(struct hostapd_iface *iface);
+	struct hostapd_config * (*config_read_cb)(const char *config_fname);
+	int (*ctrl_iface_init)(struct hostapd_data *hapd);
+	void (*ctrl_iface_deinit)(struct hostapd_data *hapd);
+	int (*for_each_interface)(struct hapd_interfaces *interfaces,
+				  int (*cb)(struct hostapd_iface *iface,
+					    void *ctx), void *ctx);
+	int (*driver_init)(struct hostapd_iface *iface);
+
+	size_t count;
+	int global_ctrl_sock;
+	char *global_iface_path;
+	char *global_iface_name;
+	struct hostapd_iface **iface;
+};
+
+
 struct hostapd_probereq_cb {
 	int (*cb)(void *ctx, const u8 *sa, const u8 *da, const u8 *bssid,
-		  const u8 *ie, size_t ie_len);
+		  const u8 *ie, size_t ie_len, int ssi_signal);
 	void *ctx;
 };
 
@@ -40,7 +59,7 @@ struct hostapd_rate_data {
 struct hostapd_frame_info {
 	u32 channel;
 	u32 datarate;
-	u32 ssi_signal;
+	int ssi_signal; /* dBm */
 };
 
 
@@ -80,6 +99,7 @@ struct hostapd_data {
 
 	struct radius_client_data *radius;
 	u32 acct_session_id_hi, acct_session_id_lo;
+	struct radius_das_data *radius_das;
 
 	struct iapp_data *iapp;
 
@@ -164,6 +184,9 @@ struct hostapd_data {
 	int noa_start;
 	int noa_duration;
 #endif /* CONFIG_P2P */
+#ifdef CONFIG_INTERWORKING
+	size_t gas_frag_limit;
+#endif /* CONFIG_INTERWORKING */
 };
 
 
@@ -173,8 +196,6 @@ struct hostapd_data {
 struct hostapd_iface {
 	struct hapd_interfaces *interfaces;
 	void *owner;
-	int (*reload_config)(struct hostapd_iface *iface);
-	struct hostapd_config * (*config_read_cb)(const char *config_fname);
 	char *config_fname;
 	struct hostapd_config *conf;
 
@@ -232,16 +253,12 @@ struct hostapd_iface {
 
 	u16 ht_op_mode;
 	void (*scan_cb)(struct hostapd_iface *iface);
-
-	int (*ctrl_iface_init)(struct hostapd_data *hapd);
-	void (*ctrl_iface_deinit)(struct hostapd_data *hapd);
-
-	int (*for_each_interface)(struct hapd_interfaces *interfaces,
-				  int (*cb)(struct hostapd_iface *iface,
-					    void *ctx), void *ctx);
 };
 
 /* hostapd.c */
+int hostapd_for_each_interface(struct hapd_interfaces *interfaces,
+			       int (*cb)(struct hostapd_iface *iface,
+					 void *ctx), void *ctx);
 int hostapd_reload_config(struct hostapd_iface *iface);
 struct hostapd_data *
 hostapd_alloc_bss_data(struct hostapd_iface *hapd_iface,
@@ -253,12 +270,19 @@ void hostapd_interface_deinit(struct hostapd_iface *iface);
 void hostapd_interface_free(struct hostapd_iface *iface);
 void hostapd_new_assoc_sta(struct hostapd_data *hapd, struct sta_info *sta,
 			   int reassoc);
+void hostapd_interface_deinit_free(struct hostapd_iface *iface);
+int hostapd_enable_iface(struct hostapd_iface *hapd_iface);
+int hostapd_reload_iface(struct hostapd_iface *hapd_iface);
+int hostapd_disable_iface(struct hostapd_iface *hapd_iface);
+int hostapd_add_iface(struct hapd_interfaces *ifaces, char *buf);
+int hostapd_remove_iface(struct hapd_interfaces *ifaces, char *buf);
 
 /* utils.c */
 int hostapd_register_probereq_cb(struct hostapd_data *hapd,
 				 int (*cb)(void *ctx, const u8 *sa,
 					   const u8 *da, const u8 *bssid,
-					   const u8 *ie, size_t ie_len),
+					   const u8 *ie, size_t ie_len,
+					   int ssi_signal),
 				 void *ctx);
 void hostapd_prune_associations(struct hostapd_data *hapd, const u8 *addr);
 
@@ -268,6 +292,9 @@ int hostapd_notif_assoc(struct hostapd_data *hapd, const u8 *addr,
 void hostapd_notif_disassoc(struct hostapd_data *hapd, const u8 *addr);
 void hostapd_event_sta_low_ack(struct hostapd_data *hapd, const u8 *addr);
 int hostapd_probe_req_rx(struct hostapd_data *hapd, const u8 *sa, const u8 *da,
-			 const u8 *bssid, const u8 *ie, size_t ie_len);
+			 const u8 *bssid, const u8 *ie, size_t ie_len,
+			 int ssi_signal);
+void hostapd_event_ch_switch(struct hostapd_data *hapd, int freq, int ht,
+			     int offset);
 
 #endif /* HOSTAPD_H */

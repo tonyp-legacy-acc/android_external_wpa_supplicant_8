@@ -35,6 +35,9 @@ struct eap_peer_config {
 	 *
 	 * If not set, the identity field will be used for both unencrypted and
 	 * protected fields.
+	 *
+	 * This field can also be used with EAP-SIM/AKA/AKA' to store the
+	 * pseudonym identity.
 	 */
 	u8 *anonymous_identity;
 
@@ -619,6 +622,7 @@ struct eap_peer_config {
 	int fragment_size;
 
 #define EAP_CONFIG_FLAGS_PASSWORD_NTHASH BIT(0)
+#define EAP_CONFIG_FLAGS_EXT_PASSWORD BIT(1)
 	/**
 	 * flags - Network configuration flags (bitfield)
 	 *
@@ -626,6 +630,8 @@ struct eap_peer_config {
 	 * for the network parameters.
 	 * bit 0 = password is represented as a 16-byte NtPasswordHash value
 	 *         instead of plaintext password
+	 * bit 1 = password is stored in external storage; the value in the
+	 *         password field is the name of that external entry
 	 */
 	u32 flags;
 };

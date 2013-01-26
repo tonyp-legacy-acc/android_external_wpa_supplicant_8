@@ -11,6 +11,8 @@
 #include <sys/stat.h>
 #include <grp.h>
 #include <stddef.h>
+#include <unistd.h>
+#include <fcntl.h>
 #ifdef ANDROID
 #include <cutils/sockets.h>
 #endif /* ANDROID */
@@ -165,33 +167,28 @@ static void wpa_supplicant_ctrl_iface_receive(int sock, void *eloop_ctx,
 			reply_len = 2;
 	} else {
 #if defined(CONFIG_P2P) && defined(ANDROID_P2P)
-		char *ifname = NULL, *arg;
-		char cmd[256];
-		/* Skip the command name */
-		arg = os_strchr(buf, ' ');
-		if (arg) {
-			*arg++ = '\0';
-			os_strncpy(cmd, buf, sizeof(cmd));
-			/* Now search for interface= */
-			if (os_strncmp(arg, "interface=", 10) == 0) {
-				ifname = arg + 10;
-				arg = os_strchr(ifname, ' ');
-				if (arg)
-					*arg++ = '\0';
-				wpa_printf(MSG_DEBUG, "Found interface= in the arg %s ifname %s", arg, ifname);
-				for (wpa_s = wpa_s->global->ifaces; wpa_s; wpa_s = wpa_s->next) {
-					if (os_strcmp(wpa_s->ifname, ifname) == 0)
-						break;
-				}
-				if (wpa_s == NULL) {
-					wpa_printf(MSG_ERROR, "P2P: interface=%s does not exist", ifname);
-					wpa_s = eloop_ctx;
-				}
+		char *ifname, *ifend;
+
+		ifname = os_strstr(buf, "interface=");
+		if (ifname != NULL) {
+			ifend = os_strchr(ifname + 10, ' ');
+			if (ifend != NULL)
+				*ifend++ = '\0';
+			else
+				*(ifname - 1) = '\0';
+			wpa_printf(MSG_DEBUG, "Found %s", ifname);
+			for (wpa_s = wpa_s->global->ifaces; wpa_s; wpa_s = wpa_s->next) {
+				if (os_strcmp(wpa_s->ifname, ifname + 10) == 0)
+					break;
 			}
-			if (arg)
-				os_snprintf(buf, sizeof(buf), "%s %s", cmd, arg);
+			if (wpa_s == NULL) {
+				wpa_printf(MSG_ERROR, "P2P: %s does not exist", ifname);
+				wpa_s = eloop_ctx;
+			}
+			if (ifend != NULL)
+				os_memmove(ifname, ifend, strlen(ifend) + 1);
+			wpa_printf(MSG_INFO, "wpa_s->ifname %s cmd %s", wpa_s ? wpa_s->ifname : "NULL", buf);
 		}
-		wpa_printf(MSG_DEBUG, "wpa_s %p cmd %s", wpa_s, buf);
 #endif /* defined CONFIG_P2P && defined ANDROID_P2P */
 		reply = wpa_supplicant_ctrl_iface_process(wpa_s, buf,
 							  &reply_len);
@@ -288,6 +285,7 @@ wpa_supplicant_ctrl_iface_init(struct wpa_supplicant *wpa_s)
 	char *buf, *dir = NULL, *gid_str = NULL;
 	struct group *grp;
 	char *endp;
+	int flags;
 
 	priv = os_zalloc(sizeof(*priv));
 	if (priv == NULL)
@@ -404,7 +402,7 @@ wpa_supplicant_ctrl_iface_init(struct wpa_supplicant *wpa_s)
 			}
 			if (bind(priv->sock, (struct sockaddr *) &addr,
 				 sizeof(addr)) < 0) {
-				perror("bind(PF_UNIX)");
+				perror("supp-ctrl-iface-init: bind(PF_UNIX)");
 				goto fail;
 			}
 			wpa_printf(MSG_DEBUG, "Successfully replaced leftover "
@@ -434,6 +432,20 @@ wpa_supplicant_ctrl_iface_init(struct wpa_supplicant *wpa_s)
 #ifdef ANDROID
 havesock:
 #endif /* ANDROID */
+
+	/*
+	 * Make socket non-blocking so that we don't hang forever if
+	 * target dies unexpectedly.
+	 */
+	flags = fcntl(priv->sock, F_GETFL);
+	if (flags >= 0) {
+		flags |= O_NONBLOCK;
+		if (fcntl(priv->sock, F_SETFL, flags) < 0) {
+			perror("fcntl(ctrl, O_NONBLOCK)");
+			/* Not fatal, continue on.*/
+		}
+	}
+
 	eloop_register_read_sock(priv->sock, wpa_supplicant_ctrl_iface_receive,
 				 wpa_s, priv);
 	wpa_msg_register_cb(wpa_supplicant_ctrl_iface_msg_cb);
@@ -696,7 +708,8 @@ wpa_supplicant_global_ctrl_iface_init(struct wpa_global *global)
 	os_strlcpy(addr.sun_path, global->params.ctrl_interface,
 		   sizeof(addr.sun_path));
 	if (bind(priv->sock, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
-		perror("bind(PF_UNIX)");
+		perror("supp-global-ctrl-iface-init (will try fixup): "
+		       "bind(PF_UNIX)");
 		if (connect(priv->sock, (struct sockaddr *) &addr,
 			    sizeof(addr)) < 0) {
 			wpa_printf(MSG_DEBUG, "ctrl_iface exists, but does not"
@@ -711,7 +724,7 @@ wpa_supplicant_global_ctrl_iface_init(struct wpa_global *global)
 			}
 			if (bind(priv->sock, (struct sockaddr *) &addr,
 				 sizeof(addr)) < 0) {
-				perror("bind(PF_UNIX)");
+				perror("supp-glb-iface-init: bind(PF_UNIX)");
 				goto fail;
 			}
 			wpa_printf(MSG_DEBUG, "Successfully replaced leftover "

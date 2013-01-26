@@ -21,8 +21,10 @@ struct tls_keys {
 };
 
 enum tls_event {
+	TLS_CERT_CHAIN_SUCCESS,
 	TLS_CERT_CHAIN_FAILURE,
-	TLS_PEER_CERTIFICATE
+	TLS_PEER_CERTIFICATE,
+	TLS_ALERT
 };
 
 /*
@@ -57,6 +59,12 @@ union tls_event_data {
 		const u8 *hash;
 		size_t hash_len;
 	} peer_cert;
+
+	struct {
+		int is_local;
+		const char *type;
+		const char *description;
+	} alert;
 };
 
 struct tls_config {
@@ -73,6 +81,7 @@ struct tls_config {
 
 #define TLS_CONN_ALLOW_SIGN_RSA_MD5 BIT(0)
 #define TLS_CONN_DISABLE_TIME_CHECKS BIT(1)
+#define TLS_CONN_DISABLE_SESSION_TICKET BIT(2)
 
 /**
  * struct tls_connection_params - Parameters for TLS connection

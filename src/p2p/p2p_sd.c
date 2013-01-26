@@ -15,15 +15,55 @@
 #include "p2p.h"
 
 
+#ifdef CONFIG_WIFI_DISPLAY
+static int wfd_wsd_supported(struct wpabuf *wfd)
+{
+	const u8 *pos, *end;
+	u8 subelem;
+	u16 len;
+
+	if (wfd == NULL)
+		return 0;
+
+	pos = wpabuf_head(wfd);
+	end = pos + wpabuf_len(wfd);
+
+	while (pos + 3 <= end) {
+		subelem = *pos++;
+		len = WPA_GET_BE16(pos);
+		pos += 2;
+		if (pos + len > end)
+			break;
+
+		if (subelem == WFD_SUBELEM_DEVICE_INFO && len >= 6) {
+			u16 info = WPA_GET_BE16(pos);
+			return !!(info & 0x0040);
+		}
+
+		pos += len;
+	}
+
+	return 0;
+}
+#endif /* CONFIG_WIFI_DISPLAY */
+
 struct p2p_sd_query * p2p_pending_sd_req(struct p2p_data *p2p,
 					 struct p2p_device *dev)
 {
 	struct p2p_sd_query *q;
+	int wsd = 0;
 
 	if (!(dev->info.dev_capab & P2P_DEV_CAPAB_SERVICE_DISCOVERY))
 		return NULL; /* peer does not support SD */
+#ifdef CONFIG_WIFI_DISPLAY
+	if (wfd_wsd_supported(dev->info.wfd_subelems))
+		wsd = 1;
+#endif /* CONFIG_WIFI_DISPLAY */
 
 	for (q = p2p->sd_queries; q; q = q->next) {
+		/* Use WSD only if the peer indicates support or it */
+		if (q->wsd && !wsd)
+			continue;
 		if (q->for_all_peers && !(dev->flags & P2P_DEV_SD_INFO))
 			return q;
 		if (!q->for_all_peers &&
@@ -364,9 +404,14 @@ void p2p_sd_response(struct p2p_data *p2p, int freq, const u8 *dst,
 				"previous SD response");
 			wpabuf_free(p2p->sd_resp);
 		}
+		p2p->sd_resp = wpabuf_dup(resp_tlvs);
+		if (p2p->sd_resp == NULL) {
+			wpa_msg(p2p->cfg->msg_ctx, MSG_ERROR, "P2P: Failed to "
+				"allocate SD response fragmentation area");
+			return;
+		}
 		os_memcpy(p2p->sd_resp_addr, dst, ETH_ALEN);
 		p2p->sd_resp_dialog_token = dialog_token;
-		p2p->sd_resp = wpabuf_dup(resp_tlvs);
 		p2p->sd_resp_pos = 0;
 		p2p->sd_frag_id = 0;
 		resp = p2p_build_sd_response(dialog_token, WLAN_STATUS_SUCCESS,
@@ -404,9 +449,18 @@ void p2p_rx_gas_initial_resp(struct p2p_data *p2p, const u8 *sa,
 	u16 slen;
 	u16 update_indic;
 
+#ifdef ANDROID_P2P
+	if (p2p->state != P2P_SD_DURING_FIND) {
+		wpa_msg(p2p->cfg->msg_ctx, MSG_DEBUG,
+			"P2P: #### Not ignoring unexpected GAS Initial Response from "
+			MACSTR " state %d", MAC2STR(sa), p2p->state);
+	}
+	if (p2p->sd_peer == NULL ||
+#else
 	if (p2p->state != P2P_SD_DURING_FIND || p2p->sd_peer == NULL ||
+#endif
 	    os_memcmp(sa, p2p->sd_peer->info.p2p_device_addr, ETH_ALEN) != 0) {
-		wpa_msg(p2p->cfg->msg_ctx, MSG_ERROR,
+		wpa_msg(p2p->cfg->msg_ctx, MSG_DEBUG,
 			"P2P: Ignore unexpected GAS Initial Response from "
 			MACSTR, MAC2STR(sa));
 		return;
@@ -645,7 +699,16 @@ void p2p_rx_gas_comeback_resp(struct p2p_data *p2p, const u8 *sa,
 
 	wpa_hexdump(MSG_DEBUG, "P2P: RX GAS Comeback Response", data, len);
 
+#ifdef ANDROID_P2P
+	if (p2p->state != P2P_SD_DURING_FIND) {
+		wpa_msg(p2p->cfg->msg_ctx, MSG_DEBUG,
+			"P2P: #### Not ignoring unexpected GAS Comeback Response from "
+			MACSTR " state %d", MAC2STR(sa), p2p->state);
+	}
+	if (p2p->sd_peer == NULL ||
+#else
 	if (p2p->state != P2P_SD_DURING_FIND || p2p->sd_peer == NULL ||
+#endif
 	    os_memcmp(sa, p2p->sd_peer->info.p2p_device_addr, ETH_ALEN) != 0) {
 		wpa_msg(p2p->cfg->msg_ctx, MSG_DEBUG,
 			"P2P: Ignore unexpected GAS Comeback Response from "
@@ -842,7 +905,7 @@ void * p2p_sd_request(struct p2p_data *p2p, const u8 *dst,
 {
 	struct p2p_sd_query *q;
 #ifdef ANDROID_P2P
-	/* Currently, supplicant doesn't support more than one pending broadcast SD request. 
+	/* Currently, supplicant doesn't support more than one pending broadcast SD request.
 	 * So reject if application is registering another one before cancelling the existing one.
 	 */
 	for (q = p2p->sd_queries; q; q = q->next) {
@@ -872,7 +935,7 @@ void * p2p_sd_request(struct p2p_data *p2p, const u8 *dst,
 
 	q->next = p2p->sd_queries;
 	p2p->sd_queries = q;
-	wpa_msg(p2p->cfg->msg_ctx, MSG_DEBUG, "P2P: Added SD Query %p for_all_peers %d", q, q->for_all_peers);
+	wpa_msg(p2p->cfg->msg_ctx, MSG_DEBUG, "P2P: Added SD Query %p", q);
 
 	if (dst == NULL) {
 		struct p2p_device *dev;
@@ -884,33 +947,56 @@ void * p2p_sd_request(struct p2p_data *p2p, const u8 *dst,
 }
 
 
+#ifdef CONFIG_WIFI_DISPLAY
+void * p2p_sd_request_wfd(struct p2p_data *p2p, const u8 *dst,
+			  const struct wpabuf *tlvs)
+{
+	struct p2p_sd_query *q;
+	q = p2p_sd_request(p2p, dst, tlvs);
+	if (q)
+		q->wsd = 1;
+	return q;
+}
+#endif /* CONFIG_WIFI_DISPLAY */
+
+
+#ifdef ANDROID_P2P
+void p2p_sd_service_update(struct p2p_data *p2p, int action)
+#else
 void p2p_sd_service_update(struct p2p_data *p2p)
+#endif
 {
 	p2p->srv_update_indic++;
+#ifdef ANDROID_P2P
+	if(action == SRV_FLUSH)
+		p2p->srv_count = 0;
+	else if (action == SRV_DEL)
+		p2p->srv_count--;
+	else if (action == SRV_ADD)
+		p2p->srv_count++;
+
+	if(p2p->cfg->sd_request) {
+		if (p2p->srv_count == 1) {
+			/* First Service Registered. Enable SD capability */
+			p2p->dev_capab |= P2P_DEV_CAPAB_SERVICE_DISCOVERY;
+		} else if (p2p->srv_count == 0 && !p2p->sd_queries) {
+			/* No services remaining + No queries registered .
+			 * Remove the SD Capability 
+			 */
+			p2p->dev_capab &= ~P2P_DEV_CAPAB_SERVICE_DISCOVERY;
+		}
+	}
+#endif
 }
 
 
 int p2p_sd_cancel_request(struct p2p_data *p2p, void *req)
 {
 	if (p2p_unlink_sd_query(p2p, req)) {
-#ifdef ANDROID_P2P
-	struct p2p_device *dev;
-	struct p2p_sd_query *q = (struct p2p_sd_query *)req;
-#endif
 		wpa_msg(p2p->cfg->msg_ctx, MSG_DEBUG,
 			"P2P: Cancel pending SD query %p", req);
 #ifdef ANDROID_P2P
-		/* If the request is a bcast query, then clear the
-		 * P2P_DEV_SD_INFO flag so that when new sd query is registered,
-		 * we will send the SD request frames to peer devices.
-		 */
-		if(q->for_all_peers) {
-			p2p->sd_dev_list = NULL;
-			dl_list_for_each(dev, &p2p->devices,
-							struct p2p_device, list) {
-				dev->flags &= ~P2P_DEV_SD_INFO;
-			}
-		}
+		p2p->sd_dev_list = NULL;
 #endif
 		p2p_free_sd_query(req);
 		return 0;

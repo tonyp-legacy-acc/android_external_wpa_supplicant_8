@@ -110,7 +110,7 @@ static void * eap_ttls_init(struct eap_sm *sm)
 		data->phase2_eap_type.method = EAP_TYPE_NONE;
 	}
 
-	if (eap_peer_tls_ssl_init(sm, &data->ssl, config)) {
+	if (eap_peer_tls_ssl_init(sm, &data->ssl, config, EAP_TYPE_TTLS)) {
 		wpa_printf(MSG_INFO, "EAP-TTLS: Failed to initialize SSL.");
 		eap_ttls_deinit(sm, data);
 		return NULL;
@@ -401,6 +401,7 @@ static int eap_ttls_phase2_request_mschapv2(struct eap_sm *sm,
 					    struct eap_method_ret *ret,
 					    struct wpabuf **resp)
 {
+#ifdef EAP_MSCHAPv2
 	struct wpabuf *msg;
 	u8 *buf, *pos, *challenge, *peer_challenge;
 	const u8 *identity, *password;
@@ -435,7 +436,6 @@ static int eap_ttls_phase2_request_mschapv2(struct eap_sm *sm,
 			   "implicit challenge");
 		return -1;
 	}
-	peer_challenge = challenge + 1 + EAP_TTLS_MSCHAPV2_CHALLENGE_LEN;
 
 	pos = eap_ttls_avp_add(buf, pos, RADIUS_ATTR_MS_CHAP_CHALLENGE,
 			       RADIUS_VENDOR_ID_MICROSOFT, 1,
@@ -448,7 +448,14 @@ static int eap_ttls_phase2_request_mschapv2(struct eap_sm *sm,
 	data->ident = challenge[EAP_TTLS_MSCHAPV2_CHALLENGE_LEN];
 	*pos++ = data->ident;
 	*pos++ = 0; /* Flags */
-	os_memcpy(pos, peer_challenge, EAP_TTLS_MSCHAPV2_CHALLENGE_LEN);
+	if (os_get_random(pos, EAP_TTLS_MSCHAPV2_CHALLENGE_LEN) < 0) {
+		os_free(challenge);
+		wpabuf_free(msg);
+		wpa_printf(MSG_ERROR, "EAP-TTLS/MSCHAPV2: Failed to get "
+			   "random data for peer challenge");
+		return -1;
+	}
+	peer_challenge = pos;
 	pos += EAP_TTLS_MSCHAPV2_CHALLENGE_LEN;
 	os_memset(pos, 0, 8); /* Reserved, must be zero */
 	pos += 8;
@@ -456,6 +463,7 @@ static int eap_ttls_phase2_request_mschapv2(struct eap_sm *sm,
 				     password_len, pwhash, challenge,
 				     peer_challenge, pos, data->auth_response,
 				     data->master_key)) {
+		os_free(challenge);
 		wpabuf_free(msg);
 		wpa_printf(MSG_ERROR, "EAP-TTLS/MSCHAPV2: Failed to derive "
 			   "response");
@@ -481,6 +489,10 @@ static int eap_ttls_phase2_request_mschapv2(struct eap_sm *sm,
 	}
 
 	return 0;
+#else /* EAP_MSCHAPv2 */
+	wpa_printf(MSG_ERROR, "EAP-TTLS: MSCHAPv2 not included in the build");
+	return -1;
+#endif /* EAP_MSCHAPv2 */
 }
 
 
@@ -1035,6 +1047,7 @@ static int eap_ttls_process_phase2_mschapv2(struct eap_sm *sm,
 					    struct eap_method_ret *ret,
 					    struct ttls_parse_avp *parse)
 {
+#ifdef EAP_MSCHAPv2
 	if (parse->mschapv2_error) {
 		wpa_printf(MSG_DEBUG, "EAP-TTLS/MSCHAPV2: Received "
 			   "MS-CHAP-Error - failed");
@@ -1083,6 +1096,10 @@ static int eap_ttls_process_phase2_mschapv2(struct eap_sm *sm,
 	 * with EAP-Success after this.
 	 */
 	return 1;
+#else /* EAP_MSCHAPv2 */
+	wpa_printf(MSG_ERROR, "EAP-TTLS: MSCHAPv2 not included in the build");
+	return -1;
+#endif /* EAP_MSCHAPv2 */
 }
 
 

@@ -45,6 +45,8 @@ u8 * hostapd_eid_supp_rates(struct hostapd_data *hapd, u8 *eid);
 u8 * hostapd_eid_ext_supp_rates(struct hostapd_data *hapd, u8 *eid);
 u8 * hostapd_eid_ht_capabilities(struct hostapd_data *hapd, u8 *eid);
 u8 * hostapd_eid_ht_operation(struct hostapd_data *hapd, u8 *eid);
+u8 * hostapd_eid_vht_capabilities(struct hostapd_data *hapd, u8 *eid);
+u8 * hostapd_eid_vht_operation(struct hostapd_data *hapd, u8 *eid);
 int hostapd_ht_operation_update(struct hostapd_iface *iface);
 void ieee802_11_send_sa_query_req(struct hostapd_data *hapd,
 				  const u8 *addr, const u8 *trans_id);
@@ -54,6 +56,8 @@ void hostapd_get_ht_capab(struct hostapd_data *hapd,
 u16 copy_sta_ht_capab(struct hostapd_data *hapd, struct sta_info *sta,
 		      const u8 *ht_capab, size_t ht_capab_len);
 void update_ht_state(struct hostapd_data *hapd, struct sta_info *sta);
+u16 copy_sta_vht_capab(struct hostapd_data *hapd, struct sta_info *sta,
+		       const u8 *vht_capab, size_t vht_capab_len);
 void hostapd_tx_status(struct hostapd_data *hapd, const u8 *addr,
 		       const u8 *buf, size_t len, int ack);
 void hostapd_eapol_tx_status(struct hostapd_data *hapd, const u8 *dst,
@@ -72,5 +76,6 @@ u8 * hostapd_eid_time_adv(struct hostapd_data *hapd, u8 *eid);
 u8 * hostapd_eid_time_zone(struct hostapd_data *hapd, u8 *eid);
 int hostapd_update_time_adv(struct hostapd_data *hapd);
 void hostapd_client_poll_ok(struct hostapd_data *hapd, const u8 *addr);
+u8 * hostapd_eid_bss_max_idle_period(struct hostapd_data *hapd, u8 *eid);
 
 #endif /* IEEE802_11_H */

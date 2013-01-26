@@ -55,6 +55,11 @@ $(DESTDIR)$(BINDIR)/%: %
 install: $(addprefix $(DESTDIR)$(BINDIR)/,$(BINALL))
 	$(MAKE) -C ../src install
 
+ifdef CONFIG_FIPS
+CONFIG_NO_RANDOM_POOL=
+CONFIG_OPENSSL_CMAC=y
+endif
+
 OBJS = config.o
 OBJS += notify.o
 OBJS += bss.o
@@ -167,6 +172,11 @@ NEED_SHA256=y
 NEED_AES_OMAC1=y
 endif
 
+ifdef CONFIG_IEEE80211V
+CFLAGS += -DCONFIG_IEEE80211V
+OBJS += wnm_sta.o
+endif
+
 ifdef CONFIG_TDLS
 CFLAGS += -DCONFIG_TDLS
 OBJS += ../src/rsn_supp/tdls.o
@@ -225,6 +235,17 @@ CONFIG_AP=y
 ifdef CONFIG_P2P_STRICT
 CFLAGS += -DCONFIG_P2P_STRICT
 endif
+endif
+
+ifdef CONFIG_WIFI_DISPLAY
+CFLAGS += -DCONFIG_WIFI_DISPLAY
+OBJS += wifi_display.o
+endif
+
+ifdef CONFIG_HS20
+OBJS += hs20_supplicant.o
+CFLAGS += -DCONFIG_HS20
+CONFIG_INTERWORKING=y
 endif
 
 ifdef CONFIG_INTERWORKING
@@ -287,6 +308,17 @@ OBJS += ../src/eap_peer/eap_tls.o
 OBJS_h += ../src/eap_server/eap_server_tls.o
 endif
 TLS_FUNCS=y
+CONFIG_IEEE8021X_EAPOL=y
+endif
+
+ifdef CONFIG_EAP_UNAUTH_TLS
+# EAP-UNAUTH-TLS
+CFLAGS += -DEAP_UNAUTH_TLS
+ifndef CONFIG_EAP_UNAUTH_TLS
+OBJS += ../src/eap_peer/eap_tls.o
+OBJS_h += ../src/eap_server/eap_server_tls.o
+TLS_FUNCS=y
+endif
 CONFIG_IEEE8021X_EAPOL=y
 endif
 
@@ -716,6 +748,10 @@ ifdef CONFIG_IEEE80211N
 CFLAGS += -DCONFIG_IEEE80211N
 endif
 
+ifdef CONFIG_WNM
+CFLAGS += -DCONFIG_WNM
+endif
+
 ifdef NEED_AP_MLME
 OBJS += ../src/ap/wmm.o
 OBJS += ../src/ap/ap_list.o
@@ -727,6 +763,12 @@ ifdef CONFIG_WPS
 CFLAGS += -DEAP_SERVER_WSC
 OBJS += ../src/ap/wps_hostapd.o
 OBJS += ../src/eap_server/eap_server_wsc.o
+endif
+ifdef CONFIG_INTERWORKING
+OBJS += ../src/ap/gas_serv.o
+endif
+ifdef CONFIG_HS20
+OBJS += ../src/ap/hs20.o
 endif
 endif
 
@@ -826,7 +868,9 @@ NEED_DES=y
 # Shared TLS functions (needed for EAP_TLS, EAP_PEAP, EAP_TTLS, and EAP_FAST)
 OBJS += ../src/eap_peer/eap_tls_common.o
 OBJS_h += ../src/eap_server/eap_server_tls_common.o
+ifndef CONFIG_FIPS
 NEED_TLS_PRF=y
+endif
 endif
 
 ifndef CONFIG_TLS
@@ -855,6 +899,10 @@ OBJS += ../src/crypto/fips_prf_openssl.o
 endif
 LIBS += -lcrypto
 LIBS_p += -lcrypto
+ifdef CONFIG_TLS_ADD_DL
+LIBS += -ldl
+LIBS_p += -ldl
+endif
 endif
 
 ifeq ($(CONFIG_TLS), gnutls)
@@ -1034,7 +1082,11 @@ AESOBJS += ../src/crypto/aes-encblock.o
 endif
 ifdef NEED_AES_OMAC1
 NEED_AES_ENC=y
+ifdef CONFIG_OPENSSL_CMAC
+CFLAGS += -DCONFIG_OPENSSL_CMAC
+else
 AESOBJS += ../src/crypto/aes-omac1.o
+endif
 endif
 ifdef NEED_AES_WRAP
 NEED_AES_ENC=y
@@ -1054,7 +1106,10 @@ OBJS += $(AESOBJS)
 endif
 
 ifdef NEED_SHA1
+ifneq ($(CONFIG_TLS), openssl)
 SHA1OBJS += ../src/crypto/sha1.o
+endif
+SHA1OBJS += ../src/crypto/sha1-prf.o
 ifdef CONFIG_INTERNAL_SHA1
 SHA1OBJS += ../src/crypto/sha1-internal.o
 ifdef NEED_FIPS186_2_PRF
@@ -1064,7 +1119,9 @@ endif
 ifdef CONFIG_NO_WPA_PASSPHRASE
 CFLAGS += -DCONFIG_NO_PBKDF2
 else
+ifneq ($(CONFIG_TLS), openssl)
 SHA1OBJS += ../src/crypto/sha1-pbkdf2.o
+endif
 endif
 ifdef NEED_T_PRF
 SHA1OBJS += ../src/crypto/sha1-tprf.o
@@ -1074,13 +1131,12 @@ SHA1OBJS += ../src/crypto/sha1-tlsprf.o
 endif
 endif
 
-MD5OBJS = ../src/crypto/md5.o
+ifndef CONFIG_FIPS
+MD5OBJS += ../src/crypto/md5.o
+endif
 ifdef NEED_MD5
 ifdef CONFIG_INTERNAL_MD5
 MD5OBJS += ../src/crypto/md5-internal.o
-endif
-ifdef CONFIG_FIPS
-MD5OBJS += ../src/crypto/md5-non-fips.o
 endif
 OBJS += $(MD5OBJS)
 OBJS_p += $(MD5OBJS)
@@ -1108,7 +1164,10 @@ endif
 SHA256OBJS = # none by default
 ifdef NEED_SHA256
 CFLAGS += -DCONFIG_SHA256
+ifneq ($(CONFIG_TLS), openssl)
 SHA256OBJS += ../src/crypto/sha256.o
+endif
+SHA256OBJS += ../src/crypto/sha256-prf.o
 ifdef CONFIG_INTERNAL_SHA256
 SHA256OBJS += ../src/crypto/sha256-internal.o
 endif
@@ -1153,6 +1212,11 @@ CFLAGS += -DCONFIG_CTRL_IFACE_UDP
 endif
 ifeq ($(CONFIG_CTRL_IFACE), named_pipe)
 CFLAGS += -DCONFIG_CTRL_IFACE_NAMED_PIPE
+endif
+ifeq ($(CONFIG_CTRL_IFACE), udp-remote)
+CONFIG_CTRL_IFACE=udp
+CFLAGS += -DCONFIG_CTRL_IFACE_UDP
+CFLAGS += -DCONFIG_CTRL_IFACE_UDP_REMOTE
 endif
 OBJS += ctrl_iface.o ctrl_iface_$(CONFIG_CTRL_IFACE).o
 endif
@@ -1270,6 +1334,10 @@ CFLAGS += -DLOG_HOSTAPD="$(CONFIG_DEBUG_SYSLOG_FACILITY)"
 endif
 endif
 
+ifdef CONFIG_DEBUG_LINUX_TRACING
+CFLAGS += -DCONFIG_DEBUG_LINUX_TRACING
+endif
+
 ifdef CONFIG_DEBUG_FILE
 CFLAGS += -DCONFIG_DEBUG_FILE
 endif
@@ -1280,6 +1348,9 @@ endif
 
 ifdef CONFIG_FIPS
 CFLAGS += -DCONFIG_FIPS
+ifneq ($(CONFIG_TLS), openssl)
+$(error CONFIG_FIPS=y requires CONFIG_TLS=openssl)
+endif
 endif
 
 OBJS += $(SHA1OBJS) $(DESOBJS)
@@ -1302,6 +1373,34 @@ endif
 ifdef NEED_BGSCAN
 CFLAGS += -DCONFIG_BGSCAN
 OBJS += bgscan.o
+endif
+
+ifdef CONFIG_AUTOSCAN_EXPONENTIAL
+CFLAGS += -DCONFIG_AUTOSCAN_EXPONENTIAL
+OBJS += autoscan_exponential.o
+NEED_AUTOSCAN=y
+endif
+
+ifdef CONFIG_AUTOSCAN_PERIODIC
+CFLAGS += -DCONFIG_AUTOSCAN_PERIODIC
+OBJS += autoscan_periodic.o
+NEED_AUTOSCAN=y
+endif
+
+ifdef NEED_AUTOSCAN
+CFLAGS += -DCONFIG_AUTOSCAN
+OBJS += autoscan.o
+endif
+
+ifdef CONFIG_EXT_PASSWORD_TEST
+OBJS += ../src/utils/ext_password_test.o
+CFLAGS += -DCONFIG_EXT_PASSWORD_TEST
+NEED_EXT_PASSWORD=y
+endif
+
+ifdef NEED_EXT_PASSWORD
+OBJS += ../src/utils/ext_password.o
+CFLAGS += -DCONFIG_EXT_PASSWORD
 endif
 
 ifdef NEED_GAS
@@ -1332,6 +1431,10 @@ ifndef CONFIG_AP
 OBJS_t += ../src/utils/ip_addr.o
 endif
 OBJS_t2 := $(OBJS) $(OBJS_l2) preauth_test.o
+
+OBJS_nfc := $(OBJS) $(OBJS_l2) nfc_pw_token.o
+OBJS_nfc += $(OBJS_d) ../src/drivers/drivers.o
+
 OBJS += $(CONFIG_MAIN).o
 
 ifdef CONFIG_PRIVSEP
@@ -1440,6 +1543,10 @@ test_wpa: $(OBJS_wpa) $(OBJS_h)
 	$(Q)$(LDO) $(LDFLAGS) -o test_wpa $(OBJS_wpa) $(LIBS)
 	@$(E) "  LD " $@
 
+nfc_pw_token: $(OBJS_nfc)
+	$(Q)$(LDO) $(LDFLAGS) -o nfc_pw_token $(OBJS_nfc) $(LIBS)
+	@$(E) "  LD " $@
+
 win_if_list: win_if_list.c
 	$(Q)$(LDO) $(LDFLAGS) -o $@ win_if_list.c $(CFLAGS) $(LIBS_w)
 	@$(E) "  LD " $@
@@ -1517,10 +1624,16 @@ test-eap_sim_common: $(TEST_EAP_SIM_COMMON_OBJS)
 
 tests: test-eap_sim_common
 
+FIPSDIR=/usr/local/ssl/fips-2.0
+FIPSLD=$(FIPSDIR)/bin/fipsld
+fips:
+	$(MAKE) CC=$(FIPSLD) FIPSLD_CC="$(CC)"
+
 clean:
 	$(MAKE) -C ../src clean
 	$(MAKE) -C dbus clean
 	rm -f core *~ *.o *.d eap_*.so $(ALL) $(WINALL) eapol_test preauth_test
 	rm -f wpa_priv
+	rm -f nfc_pw_token
 
 -include $(OBJS:%.o=%.d)

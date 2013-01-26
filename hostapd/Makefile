@@ -110,6 +110,7 @@ CONFIG_NO_ACCOUNTING=y
 else
 OBJS += ../src/radius/radius.o
 OBJS += ../src/radius/radius_client.o
+OBJS += ../src/radius/radius_das.o
 endif
 
 ifdef CONFIG_NO_ACCOUNTING
@@ -122,6 +123,12 @@ ifdef CONFIG_NO_VLAN
 CFLAGS += -DCONFIG_NO_VLAN
 else
 OBJS += ../src/ap/vlan_init.o
+ifdef CONFIG_VLAN_NETLINK
+ifdef CONFIG_FULL_DYNAMIC_VLAN
+OBJS += ../src/ap/vlan_util.o
+endif
+CFLAGS += -DCONFIG_VLAN_NETLINK
+endif
 endif
 
 ifdef CONFIG_NO_CTRL_IFACE
@@ -164,8 +171,21 @@ NEED_AES_OMAC1=y
 NEED_AES_UNWRAP=y
 endif
 
+ifdef CONFIG_IEEE80211V
+CFLAGS += -DCONFIG_IEEE80211V
+OBJS += ../src/ap/wnm_ap.o
+endif
+
 ifdef CONFIG_IEEE80211N
 CFLAGS += -DCONFIG_IEEE80211N
+endif
+
+ifdef CONFIG_WNM
+CFLAGS += -DCONFIG_WNM
+endif
+
+ifdef CONFIG_IEEE80211AC
+CFLAGS += -DCONFIG_IEEE80211AC
 endif
 
 include ../src/drivers/drivers.mak
@@ -201,6 +221,14 @@ ifdef CONFIG_EAP_TLS
 CFLAGS += -DEAP_SERVER_TLS
 OBJS += ../src/eap_server/eap_server_tls.o
 TLS_FUNCS=y
+endif
+
+ifdef CONFIG_EAP_UNAUTH_TLS
+CFLAGS += -DEAP_SERVER_UNAUTH_TLS
+ifndef CONFIG_EAP_TLS
+OBJS += ../src/eap_server/eap_server_tls.o
+TLS_FUNCS=y
+endif
 endif
 
 ifdef CONFIG_EAP_PEAP
@@ -640,14 +668,19 @@ OBJS += $(AESOBJS)
 endif
 
 ifdef NEED_SHA1
+ifneq ($(CONFIG_TLS), openssl)
 SHA1OBJS += ../src/crypto/sha1.o
+endif
+SHA1OBJS += ../src/crypto/sha1-prf.o
 ifdef CONFIG_INTERNAL_SHA1
 SHA1OBJS += ../src/crypto/sha1-internal.o
 ifdef NEED_FIPS186_2_PRF
 SHA1OBJS += ../src/crypto/fips_prf_internal.o
 endif
 endif
+ifneq ($(CONFIG_TLS), openssl)
 SHA1OBJS += ../src/crypto/sha1-pbkdf2.o
+endif
 ifdef NEED_T_PRF
 SHA1OBJS += ../src/crypto/sha1-tprf.o
 endif
@@ -687,7 +720,10 @@ endif
 
 ifdef NEED_SHA256
 CFLAGS += -DCONFIG_SHA256
+ifneq ($(CONFIG_TLS), openssl)
 OBJS += ../src/crypto/sha256.o
+endif
+OBJS += ../src/crypto/sha256-prf.o
 ifdef CONFIG_INTERNAL_SHA256
 OBJS += ../src/crypto/sha256-internal.o
 endif
@@ -752,13 +788,25 @@ ifdef CONFIG_IEEE80211N
 OBJS += ../src/ap/ieee802_11_ht.o
 endif
 
+ifdef CONFIG_IEEE80211AC
+OBJS += ../src/ap/ieee802_11_vht.o
+endif
+
 ifdef CONFIG_P2P_MANAGER
 CFLAGS += -DCONFIG_P2P_MANAGER
 OBJS += ../src/ap/p2p_hostapd.o
 endif
 
+ifdef CONFIG_HS20
+CFLAGS += -DCONFIG_HS20
+OBJS += ../src/ap/hs20.o
+CONFIG_INTERWORKING=y
+endif
+
 ifdef CONFIG_INTERWORKING
 CFLAGS += -DCONFIG_INTERWORKING
+OBJS += ../src/common/gas.o
+OBJS += ../src/ap/gas_serv.o
 endif
 
 OBJS += ../src/drivers/driver_common.o
@@ -775,6 +823,12 @@ endif
 
 ifdef CONFIG_DEBUG_FILE
 CFLAGS += -DCONFIG_DEBUG_FILE
+endif
+
+ifdef CONFIG_SQLITE
+CFLAGS += -DCONFIG_SQLITE
+LIBS += -lsqlite3
+LIBS_h += -lsqlite3
 endif
 
 ALL=hostapd hostapd_cli

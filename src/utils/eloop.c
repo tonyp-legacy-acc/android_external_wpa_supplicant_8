@@ -153,8 +153,8 @@ static int eloop_sock_table_add_sock(struct eloop_sock_table *table,
 #ifdef CONFIG_ELOOP_POLL
 	if (new_max_sock >= eloop.max_pollfd_map) {
 		struct pollfd **nmap;
-		nmap = os_realloc(eloop.pollfds_map, sizeof(struct pollfd *) *
-				  (new_max_sock + 50));
+		nmap = os_realloc_array(eloop.pollfds_map, new_max_sock + 50,
+					sizeof(struct pollfd *));
 		if (nmap == NULL)
 			return -1;
 
@@ -165,7 +165,8 @@ static int eloop_sock_table_add_sock(struct eloop_sock_table *table,
 	if (eloop.count + 1 > eloop.max_poll_fds) {
 		struct pollfd *n;
 		int nmax = eloop.count + 1 + 50;
-		n = os_realloc(eloop.pollfds, sizeof(struct pollfd) * nmax);
+		n = os_realloc_array(eloop.pollfds, nmax,
+				     sizeof(struct pollfd));
 		if (n == NULL)
 			return -1;
 
@@ -175,9 +176,8 @@ static int eloop_sock_table_add_sock(struct eloop_sock_table *table,
 #endif /* CONFIG_ELOOP_POLL */
 
 	eloop_trace_sock_remove_ref(table);
-	tmp = (struct eloop_sock *)
-		os_realloc(table->table,
-			   (table->count + 1) * sizeof(struct eloop_sock));
+	tmp = os_realloc_array(table->table, table->count + 1,
+			       sizeof(struct eloop_sock));
 	if (tmp == NULL)
 		return -1;
 
@@ -278,7 +278,7 @@ static int eloop_sock_table_set_fds(struct eloop_sock_table *readers,
 				pollfds_map[fd] = pfd;
 				nxt++;
 			}
-			pfd->events |= POLLIN;
+			pfd->events |= POLLOUT;
 		}
 	}
 
@@ -350,7 +350,8 @@ static void eloop_sock_table_dispatch(struct eloop_sock_table *readers,
 				      int max_pollfd_map)
 {
 	if (eloop_sock_table_dispatch_table(readers, pollfds_map,
-					    max_pollfd_map, POLLIN))
+					    max_pollfd_map, POLLIN | POLLERR |
+					    POLLHUP))
 		return; /* pollfds may be invalid at this point */
 
 	if (eloop_sock_table_dispatch_table(writers, pollfds_map,
@@ -638,10 +639,8 @@ int eloop_register_signal(int sig, eloop_signal_handler handler,
 {
 	struct eloop_signal *tmp;
 
-	tmp = (struct eloop_signal *)
-		os_realloc(eloop.signals,
-			   (eloop.signal_count + 1) *
-			   sizeof(struct eloop_signal));
+	tmp = os_realloc_array(eloop.signals, eloop.signal_count + 1,
+			       sizeof(struct eloop_signal));
 	if (tmp == NULL)
 		return -1;
 

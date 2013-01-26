@@ -221,6 +221,9 @@ static int wpa_supplicant_process_smk_m2(
 	if (cipher & WPA_CIPHER_CCMP) {
 		wpa_printf(MSG_DEBUG, "RSN: Using CCMP for PeerKey");
 		cipher = WPA_CIPHER_CCMP;
+	} else if (cipher & WPA_CIPHER_GCMP) {
+		wpa_printf(MSG_DEBUG, "RSN: Using GCMP for PeerKey");
+		cipher = WPA_CIPHER_GCMP;
 	} else if (cipher & WPA_CIPHER_TKIP) {
 		wpa_printf(MSG_DEBUG, "RSN: Using TKIP for PeerKey");
 		cipher = WPA_CIPHER_TKIP;
@@ -267,10 +270,7 @@ static int wpa_supplicant_process_smk_m2(
 	/* Include only the selected cipher in pairwise cipher suite */
 	WPA_PUT_LE16(pos, 1);
 	pos += 2;
-	if (cipher == WPA_CIPHER_CCMP)
-		RSN_SELECTOR_PUT(pos, RSN_CIPHER_SUITE_CCMP);
-	else if (cipher == WPA_CIPHER_TKIP)
-		RSN_SELECTOR_PUT(pos, RSN_CIPHER_SUITE_TKIP);
+	RSN_SELECTOR_PUT(pos, wpa_cipher_to_suite(WPA_PROTO_RSN, cipher));
 	pos += RSN_SELECTOR_LEN;
 
 	hdr->len = (pos - peerkey->rsnie_p) - 2;
@@ -344,7 +344,7 @@ static void wpa_supplicant_send_stk_1_of_4(struct wpa_sm *sm,
 
 	msg->type = EAPOL_KEY_TYPE_RSN;
 
-	if (peerkey->cipher == WPA_CIPHER_CCMP)
+	if (peerkey->cipher != WPA_CIPHER_TKIP)
 		ver = WPA_KEY_INFO_TYPE_HMAC_SHA1_AES;
 	else
 		ver = WPA_KEY_INFO_TYPE_HMAC_MD5_RC4;
@@ -352,7 +352,7 @@ static void wpa_supplicant_send_stk_1_of_4(struct wpa_sm *sm,
 	key_info = ver | WPA_KEY_INFO_KEY_TYPE | WPA_KEY_INFO_ACK;
 	WPA_PUT_BE16(msg->key_info, key_info);
 
-	if (peerkey->cipher == WPA_CIPHER_CCMP)
+	if (peerkey->cipher != WPA_CIPHER_TKIP)
 		WPA_PUT_BE16(msg->key_length, 16);
 	else
 		WPA_PUT_BE16(msg->key_length, 32);
@@ -403,7 +403,7 @@ static void wpa_supplicant_send_stk_3_of_4(struct wpa_sm *sm,
 
 	msg->type = EAPOL_KEY_TYPE_RSN;
 
-	if (peerkey->cipher == WPA_CIPHER_CCMP)
+	if (peerkey->cipher != WPA_CIPHER_TKIP)
 		ver = WPA_KEY_INFO_TYPE_HMAC_SHA1_AES;
 	else
 		ver = WPA_KEY_INFO_TYPE_HMAC_MD5_RC4;
@@ -412,7 +412,7 @@ static void wpa_supplicant_send_stk_3_of_4(struct wpa_sm *sm,
 		WPA_KEY_INFO_MIC | WPA_KEY_INFO_SECURE;
 	WPA_PUT_BE16(msg->key_info, key_info);
 
-	if (peerkey->cipher == WPA_CIPHER_CCMP)
+	if (peerkey->cipher != WPA_CIPHER_TKIP)
 		WPA_PUT_BE16(msg->key_length, 16);
 	else
 		WPA_PUT_BE16(msg->key_length, 32);
@@ -500,6 +500,9 @@ static int wpa_supplicant_process_smk_m5(struct wpa_sm *sm,
 	if (cipher & WPA_CIPHER_CCMP) {
 		wpa_printf(MSG_DEBUG, "RSN: Using CCMP for PeerKey");
 		peerkey->cipher = WPA_CIPHER_CCMP;
+	} else if (cipher & WPA_CIPHER_GCMP) {
+		wpa_printf(MSG_DEBUG, "RSN: Using GCMP for PeerKey");
+		peerkey->cipher = WPA_CIPHER_GCMP;
 	} else if (cipher & WPA_CIPHER_TKIP) {
 		wpa_printf(MSG_DEBUG, "RSN: Using TKIP for PeerKey");
 		peerkey->cipher = WPA_CIPHER_TKIP;
@@ -1016,7 +1019,7 @@ int wpa_sm_stkstart(struct wpa_sm *sm, const u8 *peer)
 		return -1;
 	}
 
-	if (sm->pairwise_cipher == WPA_CIPHER_CCMP)
+	if (sm->pairwise_cipher != WPA_CIPHER_TKIP)
 		ver = WPA_KEY_INFO_TYPE_HMAC_SHA1_AES;
 	else
 		ver = WPA_KEY_INFO_TYPE_HMAC_MD5_RC4;
@@ -1055,17 +1058,8 @@ int wpa_sm_stkstart(struct wpa_sm *sm, const u8 *peer)
 	count_pos = pos;
 	pos += 2;
 
-	count = 0;
-	if (sm->allowed_pairwise_cipher & WPA_CIPHER_CCMP) {
-		RSN_SELECTOR_PUT(pos, RSN_CIPHER_SUITE_CCMP);
-		pos += RSN_SELECTOR_LEN;
-		count++;
-	}
-	if (sm->allowed_pairwise_cipher & WPA_CIPHER_TKIP) {
-		RSN_SELECTOR_PUT(pos, RSN_CIPHER_SUITE_TKIP);
-		pos += RSN_SELECTOR_LEN;
-		count++;
-	}
+	count = rsn_cipher_put_suites(pos, sm->allowed_pairwise_cipher);
+	pos += count * RSN_SELECTOR_LEN;
 	WPA_PUT_LE16(count_pos, count);
 
 	hdr->len = (pos - peerkey->rsnie_i) - 2;
