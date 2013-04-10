@@ -7,4 +7,6 @@ ifeq ($(WPA_SUPPLICANT_VERSION),VER_0_8_X)
 # set up in the other Android.mk.
 include $(LOCAL_PATH)/hostapd/Android.mk \
         $(LOCAL_PATH)/wpa_supplicant/Android.mk
+LOCAL_CFLAGS+=-O2
+LOCAL_CFLAGS += -fno-strict-aliasing
 endif
